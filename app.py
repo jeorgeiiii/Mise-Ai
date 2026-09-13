@@ -1,4 +1,4 @@
-"""DocBridgeAI — Streamlit UI"""
+"""MiseAi — Streamlit UI"""
 
 import io
 import os
@@ -20,6 +20,7 @@ from src.pipeline.report import build_report, write_report_json, write_report_ma
 CONFIG = PipelineConfig(
     openai_api_key=os.getenv("OPENAI_API_KEY"),
     openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+    openai_base_url=os.getenv("OPENAI_BASE_URL"),
     output_dir="output",
     max_files=int(os.getenv("MAX_FILES", "5")),
     max_file_size_mb=int(os.getenv("MAX_FILE_SIZE_MB", "20")),
@@ -85,7 +86,7 @@ STATUS_LABEL = {
 # ── Page setup ─────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="DocBridgeAI",
+    page_title="MiseAi",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -458,7 +459,7 @@ st.markdown("""
         letter-spacing: 0.05em;
         line-height: 1;
         margin-bottom: 8px;
-    ">DOC<span style="color:#CC0000;">BRIDGE</span>&thinsp;AI</div>
+    "><span style="color:#CC0000;">MESA</span>&thinsp;AI</div>
     <div style="
         font-family:'Barlow',sans-serif;
         font-size: 0.88rem;
@@ -912,7 +913,7 @@ if report:
     report_md_path = Path(CONFIG.output_dir) / "processing_report.md"
     if report_md_path.exists():
         with st.expander("Processing report (full)", expanded=False):
-            st.markdown(report_md_path.read_text())
+            st.markdown(report_md_path.read_text(encoding="utf-8"))
 
     # ── Downloads ─────────────────────────────────────────────────────────────
 

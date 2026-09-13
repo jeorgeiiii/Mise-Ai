@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Text Cleaner
+MiseAi — Text Cleaner
 
 Two-layer text normalization:
 
@@ -38,6 +38,19 @@ _BULLET_CHARS_RE = re.compile(r"^[•·▪▸➔➢►→]\s*", re.MULTILINE)
 # Min chars before heading generation is attempted
 _MIN_CHARS_FOR_HEADINGS = 400
 
+
+def _match_case(original: str, replacement: str) -> str:
+    """
+    Apply the capitalization pattern of `original` to `replacement`, so a
+    case-insensitive glossary match doesn't flatten heading/sentence-start
+    capitalization (e.g. "Autopay" -> "Automatic payment", not "automatic payment").
+    """
+    if original.isupper() and len(original) > 1:
+        return replacement.upper()
+    if original[:1].isupper():
+        return replacement[:1].upper() + replacement[1:]
+    return replacement
+
 # LLM expansion prompt
 _LLM_SYSTEM_PROMPT = """You are a text normalization assistant for financial services.
 Your task is to expand abbreviations, shorthand, and informal language into clear, readable English.
@@ -57,14 +70,17 @@ Output: "Customer account was paid. Authorization declined on transaction. Escal
 
 _LLM_HEADING_PROMPT = """You are a document structure analyst. The document below has no section headings.
 
-Add markdown headings to organize the content into logical sections.
+Read the content and add markdown headings that describe what each section is actually about, so a reader can tell a section's topic without reading it.
 
 Rules:
 - Use # for the document title (if identifiable), ## for main sections, ### for subsections.
 - Identify section breaks from the content itself — do NOT invent sections that are not there.
+- Each heading must be a short, plain-English phrase (roughly 2-6 words) that summarizes what the paragraph(s) below it are actually about. Base it on the content of those paragraphs, not on their position in the document.
+- Do NOT use generic placeholder headings like "Section 1", "Overview", or "Details" unless that literally is what the section is about.
+- Example: if three paragraphs describe where tigers live and their natural environment, the heading should be something like "Tiger Habitat" — not "Section 1" or "Introduction".
 - Do NOT change, add, remove, or reorder any of the original text.
-- Do NOT paraphrase, summarize, or add commentary.
-- Place headings immediately before the paragraph they introduce.
+- Do NOT paraphrase, summarize, or add commentary outside of the headings themselves.
+- Place each heading immediately before the paragraph(s) it introduces.
 - If no clear sections exist, add only a single # title at the top.
 - Return the complete document text with headings added.
 """
@@ -275,16 +291,37 @@ class Cleaner:
                 r"(?<!\w)" + re.escape(abbrev) + r"(?!\w)",
                 re.IGNORECASE,
             )
-            new_text, count = pattern.subn(expansion, text)
+
+            def _replace(match: re.Match, expansion: str = expansion) -> str:
+                return _match_case(match.group(0), expansion)
+
+            new_text, count = pattern.subn(_replace, text)
             if count > 0:
                 hits.append((abbrev, expansion))
                 text = new_text
         return text, hits
 
+    def _reasoning_kwargs(self) -> dict:
+        """
+        Reasoning models (e.g. Groq's openai/gpt-oss-* family) spend part of
+        max_tokens on hidden chain-of-thought before writing the final answer.
+        On a long document that can consume the entire budget, leaving the
+        visible `content` truncated or empty even though the call "succeeded"
+        (finish_reason="length", reasoning_tokens ≈ max_tokens). Capping
+        reasoning effort avoids that. Real OpenAI chat models (gpt-4o-mini
+        etc.) reject an unrecognized `reasoning_effort` param, so this is
+        only sent for model names known to support it.
+        """
+        if "gpt-oss" in self._model:
+            return {"reasoning_effort": "low"}
+        return {}
+
     def _llm_add_headings(self, text: str) -> str:
         """
         Ask the LLM to add markdown headings to a flat document.
-        Returns the structured text. Falls back to original on failure.
+        Returns the structured text. Falls back to original on failure
+        or on an empty/truncated response (e.g. a reasoning model that
+        exhausted its token budget before producing visible output).
         """
         try:
             response = self._client.chat.completions.create(
@@ -295,16 +332,20 @@ class Cleaner:
                 ],
                 temperature=0,
                 max_tokens=8192,
+                **self._reasoning_kwargs(),
             )
-            return response.choices[0].message.content.strip()
+            result = (response.choices[0].message.content or "").strip()
+            return result if result else text
         except Exception:
             return text  # non-fatal — return original text unchanged
 
     def _llm_expand(self, text: str) -> tuple[str, list[tuple[str, str]]]:
         """
-        Send text to GPT-4o-mini for shorthand expansion.
+        Send text to the LLM for shorthand expansion.
         Returns the expanded text. Hit tracking is best-effort (we note
         that LLM expansion occurred but don't diff word-by-word).
+        Falls back to the original text if the response comes back empty
+        (see _reasoning_kwargs) rather than silently discarding content.
         """
         try:
             response = self._client.chat.completions.create(
@@ -315,8 +356,11 @@ class Cleaner:
                 ],
                 temperature=0,
                 max_tokens=4096,
+                **self._reasoning_kwargs(),
             )
-            expanded = response.choices[0].message.content.strip()
+            expanded = (response.choices[0].message.content or "").strip()
+            if not expanded:
+                return text, [("__llm_empty_response__", "LLM returned no content; kept pre-LLM text")]
             # Record that LLM expansion ran (we can't easily enumerate
             # individual word-level hits without diffing)
             hits: list[tuple[str, str]] = [("__llm__", "LLM expansion applied")]

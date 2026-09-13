@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Content Extractors
+MiseAi — Content Extractors
 
 One extractor class per file type. All return ExtractedContent so the
 rest of the pipeline never needs to know where the content came from.
@@ -58,6 +58,12 @@ def _table_to_markdown(rows: list[list]) -> str:
         padded = (row + [""] * col_count)[:col_count]
         lines.append("| " + " | ".join(padded) + " |")
     return "\n".join(lines)
+
+
+# Running headers/footers (titles, company names, "Page X of Y") are short.
+# A repeated line longer than this is treated as duplicated body content,
+# not boilerplate, and is kept.
+_MAX_HEADER_FOOTER_WORDS = 12
 
 
 def _bbox_overlaps(
@@ -175,6 +181,15 @@ class PDFTextExtractor(BaseExtractor):
         Remove lines that appear identically (or near-identically) on
         more than half the pages — those are almost certainly headers/footers.
         Also remove standalone page number lines.
+
+        Repetition alone isn't enough: documents can legitimately repeat a
+        full sentence or paragraph verbatim across pages (a recurring
+        disclaimer, duplicated boilerplate text, etc.). A real running
+        header/footer is short — a title, a company name, a "Page X of Y"
+        line — so repeated lines are only treated as header/footer noise
+        when they're short enough to plausibly be one. This keeps long,
+        repeated body sentences in the output instead of silently deleting
+        them everywhere they occur.
         """
         if len(pages_text) < 2:
             return pages_text[0] if pages_text else ""
@@ -188,11 +203,16 @@ class PDFTextExtractor(BaseExtractor):
                 if stripped:
                     line_counts[stripped] += 1
 
-        # A line is a header/footer if it appears on MORE THAN half the pages.
+        # A line is a header/footer if it appears on MORE THAN half the pages
+        # AND is short enough to be a title/label rather than body content.
         # Using strict > (not >=) prevents over-removal on 2-page docs where
         # threshold=1.0 would otherwise match every line that appears even once.
         threshold = len(pages_text) / 2
-        repeated_lines = {line for line, count in line_counts.items() if count > threshold}
+        repeated_lines = {
+            line
+            for line, count in line_counts.items()
+            if count > threshold and len(line.split()) <= _MAX_HEADER_FOOTER_WORDS
+        }
 
         # Page number pattern: a line that is just a number, optionally with "Page X of Y"
         page_number_re = re.compile(r"^\s*(page\s+\d+(\s+of\s+\d+)?|\d+)\s*$", re.IGNORECASE)
@@ -300,9 +320,10 @@ class DocxExtractor(BaseExtractor):
                 text = para.text.strip()
                 if not text:
                     continue
-                if para.style.name.startswith("Heading"):
+                style_name = para.style.name if para.style is not None else None
+                if style_name and style_name.startswith("Heading"):
                     try:
-                        level = int(para.style.name.split(" ")[-1])
+                        level = int(style_name.split(" ")[-1])
                     except ValueError:
                         level = 2
                     text = "#" * level + " " + text

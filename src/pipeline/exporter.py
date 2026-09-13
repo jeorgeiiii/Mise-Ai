@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Exporter
+MiseAi — Exporter
 
 Writes validated output files to the output directory.
 

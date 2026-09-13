@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Validator
+MiseAi — Validator
 
 Scores each processed document or tabular file for quality and routes
 it to an appropriate status.

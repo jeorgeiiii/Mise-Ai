@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Pipeline Orchestrator
+MiseAi — Pipeline Orchestrator
 
 Wires all pipeline stages together for a batch of 1–5 uploaded files.
 
@@ -43,6 +43,7 @@ class PipelineConfig:
     """Runtime configuration for a pipeline run."""
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    openai_base_url: str | None = None
     output_dir: str = "output"
     max_files: int = 5
     max_file_size_mb: int = 20
@@ -89,7 +90,7 @@ def run(
             )
 
     # Build cleaner (shared across all files in the session)
-    openai_client = _build_openai_client(config.openai_api_key)
+    openai_client = _build_openai_client(config.openai_api_key, config.openai_base_url)
     cleaner = Cleaner(openai_client=openai_client, model=config.openai_model)
 
     doc_exporter = DocumentExporter()
@@ -190,7 +191,7 @@ def _process_file(
 
 def build_cleaner(config: PipelineConfig) -> Cleaner:
     """Build a shared Cleaner instance from config. Reuse across files in the same session."""
-    client = _build_openai_client(config.openai_api_key)
+    client = _build_openai_client(config.openai_api_key, config.openai_base_url)
     return Cleaner(openai_client=client, model=config.openai_model)
 
 
@@ -225,15 +226,18 @@ def process_one(
         return (None, None, reason)
 
 
-def _build_openai_client(api_key: str | None):
+def _build_openai_client(api_key: str | None, base_url: str | None = None):
     """
-    Build an OpenAI client if an API key is available.
+    Build an OpenAI-compatible client if an API key is available.
     Returns None if the key is missing — cleaning falls back to glossary-only.
+
+    base_url lets this point at any OpenAI-compatible endpoint (e.g. Groq's
+    https://api.groq.com/openai/v1) instead of OpenAI's servers.
     """
     if not api_key or api_key.startswith("your-"):
         return None
     try:
         from openai import OpenAI
-        return OpenAI(api_key=api_key)
+        return OpenAI(api_key=api_key, base_url=base_url or None)
     except ImportError:
         return None

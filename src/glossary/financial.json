@@ -1,5 +1,5 @@
 {
-  "_comment": "DocBridgeAI Financial Services Shorthand Glossary. Keys are abbreviations (lowercase), values are full expansions. Applied as whole-word replacements before LLM expansion.",
+  "_comment": "MiseAi Financial Services Shorthand Glossary. Keys are abbreviations (lowercase), values are full expansions. Applied as whole-word, case-insensitive replacements before LLM expansion, with no surrounding context. Avoid adding keys that are also common standalone English/Latin words (e.g. 'id', 'pin', 'dr') — those need context to disambiguate, so leave them for the LLM expansion layer instead.",
 
   "acct": "account",
   "accts": "accounts",
@@ -37,7 +37,6 @@
   "escl": "escalated",
   "exp": "expiration",
   "frm": "from",
-  "id": "identification",
   "info": "information",
   "int": "interest",
   "lmt": "limit",

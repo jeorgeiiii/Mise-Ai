@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Processing Report Generator
+MiseAi — Processing Report Generator
 
 Builds a ProcessingReport from per-file results and writes it as:
   - processing_report.json  (machine-readable, full detail)
@@ -129,7 +129,7 @@ def write_report_markdown(report: ProcessingReport, output_dir: str) -> str:
 
     # Header
     lines += [
-        "# DocBridgeAI — Processing Report",
+        "# MiseAi — Processing Report",
         "",
         f"**Session ID:** `{report.session_id}`  ",
         f"**Timestamp:** {report.timestamp}",

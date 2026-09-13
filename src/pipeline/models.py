@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Data Models
+MiseAi — Data Models
 
 All dataclasses passed between pipeline stages. No business logic here.
 Each stage consumes one type and produces the next.

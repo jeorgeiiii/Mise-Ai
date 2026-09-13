@@ -1,4 +1,4 @@
-# DocBridgeAI
+# MiseAi
 
 A document normalization pipeline. Takes PDFs, scanned docs, Word files, Markdown, and spreadsheets and converts them to clean, structured output that RAG pipelines and analytics systems can ingest without manual cleanup.
 
@@ -129,9 +129,9 @@ The processing report logs which terms were handled by glossary vs. LLM.
 
 Built as a shared preprocessing layer for two other projects in this portfolio:
 
-**[NextGenCapitalRAG](../NextGenCapitalRAG)** — A banking assistant RAG system. DocBridgeAI normalizes policy documents and compliance files into the markdown format the RAG ingestion pipeline expects.
+**[NextGenCapitalRAG](../NextGenCapitalRAG)** — A banking assistant RAG system. MiseAi normalizes policy documents and compliance files into the markdown format the RAG ingestion pipeline expects.
 
-**[AIServicingIntelligence](../AIServicingIntelligence)** — A customer servicing AI system. DocBridgeAI cleans agent interaction logs from Excel/CSV exports into structured data the analytics layer can use.
+**[AIServicingIntelligence](../AIServicingIntelligence)** — A customer servicing AI system. MiseAi cleans agent interaction logs from Excel/CSV exports into structured data the analytics layer can use.
 
 Both projects have different input types and output requirements, which is why this ended up as a standalone repo rather than a module inside either one.
 
@@ -150,8 +150,8 @@ Both projects have different input types and output requirements, which is why t
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/DocBridgeAI.git
-cd DocBridgeAI
+git clone https://github.com/your-username/MiseAi.git
+cd MiseAi
 cp .env.example .env
 # Add your OpenAI API key to .env
 uv sync
@@ -187,7 +187,7 @@ The architecture is stateless per document, so the 5-file cap is a UI decision. 
 ### Known Extraction Limitations
 
 **Images, charts, and graphs in PDFs**
-DocBridgeAI extracts text only. Images, charts, diagrams, and graphs embedded in PDF files are **not extracted** — only the surrounding text is processed. A policy document with a flowchart or a report with revenue graphs will produce clean prose output but the visual content will be absent. This is reflected in the confidence score (low text-to-page ratio triggers a lower extraction confidence hint). At scale, replace Tesseract with AWS Textract or Google Document AI, which can describe image regions and extract structured table data.
+MiseAi extracts text only. Images, charts, diagrams, and graphs embedded in PDF files are **not extracted** — only the surrounding text is processed. A policy document with a flowchart or a report with revenue graphs will produce clean prose output but the visual content will be absent. This is reflected in the confidence score (low text-to-page ratio triggers a lower extraction confidence hint). At scale, replace Tesseract with AWS Textract or Google Document AI, which can describe image regions and extract structured table data.
 
 **Table structure in PDFs**
 PyMuPDF's `find_tables()` API detects and renders explicitly bordered tables as markdown. However, many PDF tables use whitespace and column alignment rather than visible borders — these are extracted as flat sequential text (column-row relationship is lost). For PDFs where table content is critical (e.g., fee schedules from a PDF generator without explicit borders), output should be reviewed before RAG ingestion. For reliable PDF table extraction at scale, swap PyMuPDF for a cloud OCR service such as AWS Textract or Google Document AI.
@@ -202,7 +202,7 @@ PDFs do not embed semantic heading markup — heading text looks the same as bod
 Tesseract OCR accuracy degrades with poor scan quality, handwriting, rotated pages, or unusual fonts. The validator scores OCR confidence using Tesseract's per-word confidence values and flags output below 0.60 as `review_required`. For production-grade OCR, swap Tesseract for a cloud OCR service — the `ScannedPDFExtractor` class is the only component that changes.
 
 **Frontmatter metadata depth**
-DocBridgeAI infers extraction metadata: `doc_id`, `title`, `doc_type`, `source_format`, `extraction_method`, `extraction_confidence`, `heading_structure`. It does **not** infer business-layer fields like `product`, `audience`, `compliance_critical`, `related_docs`, or `effective_date` — these require knowledge of your organization's document taxonomy and cannot be determined from content alone. Downstream knowledge base management (e.g., NextGenCapitalRAG's document catalog) is the appropriate place to enrich these fields after DocBridgeAI produces clean output.
+MiseAi infers extraction metadata: `doc_id`, `title`, `doc_type`, `source_format`, `extraction_method`, `extraction_confidence`, `heading_structure`. It does **not** infer business-layer fields like `product`, `audience`, `compliance_critical`, `related_docs`, or `effective_date` — these require knowledge of your organization's document taxonomy and cannot be determined from content alone. Downstream knowledge base management (e.g., NextGenCapitalRAG's document catalog) is the appropriate place to enrich these fields after MiseAi produces clean output.
 
 **XLSX: first sheet only**
 Excel files with multiple sheets are processed on the first sheet only. Move the data you want to clean to the first sheet before uploading. A note is shown in the UI when an XLSX file is detected.
@@ -211,7 +211,7 @@ Excel files with multiple sheets are processed on the first sheet only. Move the
 
 ## Scalability Path
 
-DocBridgeAI v1 is a single-process pipeline with a 5-file cap. The architecture was designed so that none of the core pipeline contracts need to change to scale to enterprise volume.
+MiseAi v1 is a single-process pipeline with a 5-file cap. The architecture was designed so that none of the core pipeline contracts need to change to scale to enterprise volume.
 
 **From 5 files to 50,000:**
 - Replace single-process execution with a task queue (Celery + Redis or AWS SQS)
@@ -255,7 +255,7 @@ DocBridgeAI v1 is a single-process pipeline with a 5-file cap. The architecture 
 ## Project Structure
 
 ```
-DocBridgeAI/
+MiseAi/
   src/
     pipeline/
       models.py       — data objects (SourceFile, ProcessedDocument, ProcessingIssue)

@@ -1,5 +1,5 @@
 """
-DocBridgeAI — Pipeline Tests
+MiseAi — Pipeline Tests
 
 Tests the full pipeline for file types that don't require external OS-level
 dependencies (markdown and CSV/XLSX are pure Python + pandas).
@@ -188,6 +188,37 @@ class TestCleaner:
         result = cleaner.clean_document(extracted)
         assert "accountount" not in result.cleaned_text
 
+    def test_glossary_does_not_mangle_standalone_id(self, cleaner):
+        """
+        Regression test: 'id' used to be a glossary entry ('identification')
+        applied as a blind whole-word substitution with no context, so any
+        standalone 'id' in ordinary text (not just financial shorthand) got
+        rewritten. 'id' collides with real English/Latin words, so it must
+        be left for the context-aware LLM layer, not the deterministic one.
+        """
+        extracted = self._make_extracted("note.md", "Integer id quam, a Latin phrase.")
+        result = cleaner.clean_document(extracted)
+        assert "identification" not in result.cleaned_text
+        assert "Integer id quam" in result.cleaned_text
+
+    def test_glossary_preserves_heading_capitalization(self, cleaner):
+        """
+        Regression test: substitution used to always insert the glossary's
+        lowercase expansion regardless of the matched word's case, so a
+        capitalized heading like "# Autopay Enrollment Policy" was flattened
+        to "# automatic payment Enrollment Policy". The expansion's
+        capitalization should follow the original matched word instead.
+        """
+        extracted = self._make_extracted("note.md", "# Autopay Enrollment Policy")
+        result = cleaner.clean_document(extracted)
+        assert "# Automatic payment Enrollment Policy" in result.cleaned_text
+        assert "# automatic payment" not in result.cleaned_text
+
+    def test_glossary_preserves_all_caps(self, cleaner):
+        extracted = self._make_extracted("note.md", "ACCT balance is overdue.")
+        result = cleaner.clean_document(extracted)
+        assert "ACCOUNT balance is overdue." in result.cleaned_text
+
     def test_structural_clean_hyphen_linebreak(self, cleaner):
         text = "Auto-\npay enrollment is required."
         extracted = self._make_extracted("note.md", text)
@@ -244,6 +275,90 @@ class TestCleaner:
         result = cleaner.clean_document(extracted)
         assert mock_client.chat.completions.create.called
         assert "Customer account declined transaction." in result.cleaned_text
+
+    def test_llm_empty_response_falls_back_to_pre_llm_text(self):
+        """
+        Regression test: reasoning models (e.g. Groq's openai/gpt-oss-* family)
+        can spend their entire max_tokens budget on hidden chain-of-thought and
+        return an empty `content` while still "succeeding" — silently blanking
+        the document if taken at face value. Must fall back to the pre-LLM text
+        instead of accepting the empty response.
+        """
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = ""  # simulates finish_reason="length"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        cleaner = Cleaner(openai_client=mock_client, model="openai/gpt-oss-120b")
+        source = make_source("note.md", "cust acct decl txn")
+        extracted = ExtractedContent(
+            source=source,
+            file_type="markdown",
+            raw_text="cust acct decl txn",
+            extraction_method="passthrough",
+            confidence_hint=1.0,
+        )
+        result = cleaner.clean_document(extracted)
+        assert mock_client.chat.completions.create.called
+        # Pre-LLM (post-glossary) text must survive, not an empty document.
+        assert result.cleaned_text.strip() != ""
+        assert result.llm_hits and result.llm_hits[0][0] == "__llm_empty_response__"
+
+    def test_reasoning_effort_sent_only_for_gpt_oss_models(self):
+        """gpt-4o-mini (and other non-gpt-oss models) must not receive reasoning_effort —
+        the real OpenAI API rejects unrecognized parameters for those models."""
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "Customer account declined."
+        mock_client.chat.completions.create.return_value = mock_response
+
+        cleaner = Cleaner(openai_client=mock_client, model="gpt-4o-mini")
+        source = make_source("note.md", "cust acct decl")
+        extracted = ExtractedContent(
+            source=source, file_type="markdown", raw_text="cust acct decl",
+            extraction_method="passthrough", confidence_hint=1.0,
+        )
+        cleaner.clean_document(extracted)
+        _, kwargs = mock_client.chat.completions.create.call_args
+        assert "reasoning_effort" not in kwargs
+
+        mock_client.reset_mock()
+        cleaner_oss = Cleaner(openai_client=mock_client, model="openai/gpt-oss-120b")
+        cleaner_oss.clean_document(extracted)
+        _, kwargs = mock_client.chat.completions.create.call_args
+        assert kwargs.get("reasoning_effort") == "low"
+
+    def test_heading_generation_prompt_asks_for_content_based_headings(self):
+        """
+        The heading prompt must instruct the LLM to derive each heading from
+        what the paragraph below it is actually about (e.g. paragraphs about
+        tiger habitat -> "Tiger Habitat"), not a generic/positional label
+        like "Section 1".
+        """
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = (
+            "# Wildlife Notes\n\n## Tiger Habitat\n\nTigers live in dense forests and grasslands."
+        )
+        mock_client.chat.completions.create.return_value = mock_response
+
+        cleaner = Cleaner(openai_client=mock_client, model="gpt-4o-mini")
+        long_text = "Tigers live in dense forests and grasslands. " * 10
+        source = make_source("wildlife.md", long_text)
+        extracted = ExtractedContent(
+            source=source, file_type="markdown", raw_text=long_text,
+            extraction_method="passthrough", confidence_hint=1.0,
+        )
+        result = cleaner.clean_document(extracted, expand_shorthand=False, generate_headings=True)
+
+        # The system prompt sent to the LLM instructs content-based headings.
+        _, kwargs = mock_client.chat.completions.create.call_args_list[-1]
+        system_prompt = kwargs["messages"][0]["content"]
+        assert "actually about" in system_prompt
+        assert "Tiger Habitat" in system_prompt  # worked example in the prompt
+
+        # The LLM's content-derived heading is used in the output.
+        assert "## Tiger Habitat" in result.cleaned_text
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +459,101 @@ class TestValidator:
 
 
 # ---------------------------------------------------------------------------
+# extractors.py
+# ---------------------------------------------------------------------------
+
+class TestDocxExtractor:
+    def test_paragraph_with_no_resolvable_style_does_not_crash(self):
+        """
+        Regression test: python-docx's Paragraph.style returns None when a
+        document's styles.xml has no default paragraph style flagged (some
+        non-Word .docx generators omit this). Extraction must not crash with
+        AttributeError on None.
+        """
+        docx = pytest.importorskip("docx")
+        from docx.oxml.ns import qn
+
+        from pipeline.extractors import DocxExtractor
+
+        doc = docx.Document()
+        doc.add_paragraph("Some heading-like text")
+
+        styles_part = doc.part.styles.element
+        for style_el in styles_part.findall(qn("w:style")):
+            if style_el.get(qn("w:type")) == "paragraph" and style_el.get(qn("w:default")):
+                del style_el.attrib[qn("w:default")]
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        raw_bytes = buf.getvalue()
+
+        # Confirm the precondition this test guards against: style resolves to None.
+        buf.seek(0)
+        reloaded = docx.Document(buf)
+        assert reloaded.paragraphs[0].style is None
+
+        source = make_source("broken_style.docx", raw_bytes)
+        result = DocxExtractor().extract(source)
+        assert "Some heading-like text" in result.raw_text
+
+
+class TestPDFTextExtractorHeaderFooterStripping:
+    """
+    Regression tests for _strip_headers_footers: it must remove genuine
+    running headers/footers (short lines repeated on most pages) without
+    deleting long body sentences that happen to repeat verbatim across
+    pages (e.g. a duplicated paragraph, a repeated disclaimer).
+    """
+
+    def test_short_repeated_line_is_stripped_as_header(self):
+        from pipeline.extractors import PDFTextExtractor
+
+        pages = [
+            "Company Confidential\nFirst page body text.",
+            "Company Confidential\nSecond page body text.",
+            "Company Confidential\nThird page body text.",
+        ]
+        result = PDFTextExtractor()._strip_headers_footers(pages)
+        assert "Company Confidential" not in result
+        assert "First page body text." in result
+        assert "Second page body text." in result
+        assert "Third page body text." in result
+
+    def test_long_repeated_sentence_is_not_stripped(self):
+        """A full sentence duplicated across pages is body content, not a
+        header/footer, and must survive even though it repeats on more
+        than half the pages."""
+        from pipeline.extractors import PDFTextExtractor
+
+        long_sentence = (
+            "Curabitur sodales ligula in libero sed dignissim lacinia nunc "
+            "curabitur tortor pellentesque nibh aenean quam."
+        )
+        pages = [
+            f"{long_sentence}\nUnique first-page line.",
+            f"{long_sentence}\nUnique second-page line.",
+            "Unrelated third page content.",
+        ]
+        result = PDFTextExtractor()._strip_headers_footers(pages)
+        assert long_sentence in result
+        assert "Unique first-page line." in result
+        assert "Unique second-page line." in result
+
+    def test_page_number_lines_still_removed(self):
+        from pipeline.extractors import PDFTextExtractor
+
+        pages = [
+            "Body text on page one.\n1",
+            "Body text on page two.\n2",
+        ]
+        result = PDFTextExtractor()._strip_headers_footers(pages)
+        assert "Body text on page one." in result
+        assert "Body text on page two." in result
+        for line in result.splitlines():
+            assert line.strip() not in ("1", "2")
+
+
+# ---------------------------------------------------------------------------
 # exporter.py
 # ---------------------------------------------------------------------------
 
@@ -389,7 +599,7 @@ class TestExporter:
         validated = self._make_validated()
         exporter = DocumentExporter()
         out_path = exporter.export(validated, str(tmp_path))
-        content = Path(out_path).read_text()
+        content = Path(out_path).read_text(encoding="utf-8")
         assert "---" in content
         assert "doc_id:" in content
         assert "processing_status:" in content
@@ -485,7 +695,7 @@ class TestReport:
         report = build_report(results)
         path = write_report_json(report, str(tmp_path))
         assert Path(path).exists()
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         assert "summary" in data
         assert data["summary"]["total_files"] == 1
 
@@ -494,7 +704,7 @@ class TestReport:
         report = build_report(results)
         path = write_report_markdown(report, str(tmp_path))
         assert Path(path).exists()
-        content = Path(path).read_text()
+        content = Path(path).read_text(encoding="utf-8")
         assert "Processing Report" in content
         assert "policy.md" in content
 
@@ -530,7 +740,7 @@ class TestPipelineEndToEnd:
         assert report.files[0].output_path is not None
         assert Path(report.files[0].output_path).exists()
         # Frontmatter present
-        content = Path(report.files[0].output_path).read_text()
+        content = Path(report.files[0].output_path).read_text(encoding="utf-8")
         assert "doc_id:" in content
         assert "processing_status:" in content
 
@@ -542,7 +752,7 @@ class TestPipelineEndToEnd:
         report = run(files=[source], tabular_columns={}, config=config)
         out_path = report.files[0].output_path
         assert out_path is not None
-        content = Path(out_path).read_text()
+        content = Path(out_path).read_text(encoding="utf-8")
         # Glossary expansions
         assert "customer" in content
         assert "account" in content

@@ -1,5 +1,5 @@
 """
-DocBridgeAI — File Type Detector
+MiseAi — File Type Detector
 
 Determines file type and processing mode from a SourceFile.
 
