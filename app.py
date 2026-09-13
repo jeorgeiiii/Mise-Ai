@@ -674,7 +674,7 @@ if doc_files:
             else:
                 st.markdown("<small style='color:#9CA3AF;'>Needs API key</small>", unsafe_allow_html=True)
 
-    api_note = "" if has_api_key else " &nbsp;·&nbsp; **Generate Headings** requires an OpenAI API key in `.env`."
+    api_note = "" if has_api_key else " &nbsp;·&nbsp; **Generate Headings** requires a GROQ_API_KEY (or OpenAI API key) in `.env`."
     st.caption(
         f"Metadata frontmatter is always added. Headers/footers are removed automatically for PDF and DOCX."
         f"{api_note} Generate Headings is automatically skipped if the document already has heading structure — no API cost incurred for structured files like DOCX."
