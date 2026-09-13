@@ -396,6 +396,19 @@ def _demo_mime(filename: str) -> str:
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     return _DEMO_MIME.get(ext, "application/octet-stream")
 
+def _build_merged_markdown(report_files) -> bytes:
+    """Combine every processed file's output into one .md, each under its own heading."""
+    blocks = []
+    for fr in report_files:
+        if not fr.output_path:
+            continue
+        p = Path(fr.output_path)
+        if not p.exists():
+            continue
+        body = p.read_text(encoding="utf-8") if p.suffix == ".md" else f"```csv\n{p.read_text(encoding='utf-8')}\n```"
+        blocks.append(f"# {fr.filename}\n\n{body}")
+    return "\n\n---\n\n".join(blocks).encode("utf-8")
+
 def _source_file(uploaded) -> SourceFile:
     raw = uploaded.getvalue()
     return SourceFile(filename=uploaded.name, size_bytes=len(raw), raw_bytes=raw)
@@ -967,6 +980,18 @@ if report:
         dl_items.append(("processing_report.json", report_json.read_bytes(), "application/json"))
     if report_md.exists():
         dl_items.append(("processing_report.md", report_md.read_bytes(), "text/markdown"))
+
+    processed_files = [fr for fr in report.files if fr.output_path and Path(fr.output_path).exists()]
+    if len(processed_files) > 1:
+        st.download_button(
+            label="↓  Download merged .md (all files combined)",
+            data=_build_merged_markdown(processed_files),
+            file_name="merged_output.md",
+            mime="text/markdown",
+            use_container_width=True,
+            key="dl_merged",
+        )
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
     if dl_items:
         cols = st.columns(3)
