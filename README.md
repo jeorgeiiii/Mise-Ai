@@ -153,7 +153,7 @@ Both projects have different input types and output requirements, which is why t
 git clone https://github.com/your-username/MiseAi.git
 cd MiseAi
 cp .env.example .env
-# Add your OpenAI API key to .env
+# Add your Groq (or OpenAI) API key to .env
 uv sync
 ```
 

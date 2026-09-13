@@ -18,9 +18,9 @@ from src.pipeline.report import build_report, write_report_json, write_report_ma
 # ── Config ────────────────────────────────────────────────────────────────────
 
 CONFIG = PipelineConfig(
-    openai_api_key=os.getenv("OPENAI_API_KEY"),
-    openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    openai_base_url=os.getenv("OPENAI_BASE_URL"),
+    openai_api_key=os.getenv("GROQ_API_KEY"),
+    openai_model=os.getenv("GROQ_MODEL", "gpt-4o-mini"),
+    openai_base_url=os.getenv("GROQ_BASE_URL"),
     output_dir="output",
     max_files=int(os.getenv("MAX_FILES", "5")),
     max_file_size_mb=int(os.getenv("MAX_FILE_SIZE_MB", "20")),
